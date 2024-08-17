@@ -1,25 +1,116 @@
+'use client';
 import Image from "next/image";
-import { ConnectButton } from "thirdweb/react";
+import { ConnectButton, MediaRenderer, TransactionButton, useActiveAccount, useReadContract } from "thirdweb/react";
 import thirdwebIcon from "@public/thirdweb.svg";
 import { client } from "./client";
+import { defineChain, getContract, toEther } from "thirdweb";
+import { sepolia } from "thirdweb/chains";
+import { getContractMetadata } from "thirdweb/extensions/common";
+import { claimTo, getActiveClaimCondition, getTotalClaimedSupply, nextTokenIdToMint } from "thirdweb/extensions/erc721";
+import { useState } from "react";
 
 export default function Home() {
+  const chain = defineChain(sepolia)
+
+  const account = useActiveAccount();
+
+  const [quantity, setQuantity] = useState(1)
+
+  const contractAddress: string = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "";
+
+  if (!contractAddress) {
+    throw new Error("Contract address is not defined.");
+  }
+  
+  const contract = getContract({
+    client: client,
+    chain: chain,
+    address: contractAddress, // Now TypeScript knows this is a string
+  });
+  
+
+  const { data: contractMetadata, isLoading: isContractMetadataLoading } = useReadContract(getContractMetadata,
+    { contract: contract }
+  )
+
+  const { data: claimedSupply, isLoading: isClaimedSupplyLoading } = useReadContract(getTotalClaimedSupply,
+    { contract: contract }
+  )
+
+  const { data: totalNFTSupply, isLoading: isTotalSupply } = useReadContract(nextTokenIdToMint,
+    { contract: contract }
+  )
+
+  const { data: claimCondition } = useReadContract(getActiveClaimCondition,
+    { contract: contract }
+  )
+
+  const getPrice = (quantity: number) => {
+    const total = quantity * parseInt(claimCondition?.pricePerToken.toString() || "0")
+    return toEther(BigInt(total));
+  }
+
   return (
     <main className="p-4 pb-10 min-h-[100vh] flex items-center justify-center container max-w-screen-lg mx-auto">
       <div className="py-20">
         <Header />
+        <ConnectButton
+          client={client}
+          chain={chain}
+        />
+        <div className="flex flex-col items-center mt-4">
+          {isContractMetadataLoading ? (
+            <div className="text-zinc-500">Loading contract metadata...</div>
+          ) : (
+            <div className="text-center">
+              <MediaRenderer
+                client={client}
+                src={contractMetadata?.image}
+                className="rounded-xl"
+              />
+              <h2 className="text-2xl md:text-4xl font-semibold md:font-bold tracking-tighter mb-6">
+                {contractMetadata?.name}
+              </h2>
+              <p className="text-zinc-500">{contractMetadata?.description}</p>
 
-        <div className="flex justify-center mb-20">
-          <ConnectButton
-            client={client}
-            appMetadata={{
-              name: "Example App",
-              url: "https://example.com",
-            }}
-          />
+              {isClaimedSupplyLoading || isTotalSupply ? (
+                <div className="text-zinc-500">Loading...</div>
+              ) : (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold md:font-bold tracking-tighter mb-2">
+                    Total NFT supply:
+                  </h3>
+                  <p className="text-zinc-500">
+                    {claimedSupply?.toString()} / {totalNFTSupply?.toString()}
+                  </p>
+                </div>)}
+                <div className="flex flex-row items-center justify-center my-4">
+                  <button
+                    onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  >-</button>
+                  <input type="number" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value))} name="" id=""
+                    className="border-2 border-zinc-500 text-center m-2 bg-black w-10 rounded-md overflow-hidden"
+                  />
+                  <button
+                    onClick={() => setQuantity(quantity + 1)}
+                  >+</button>
+                </div>
+                <TransactionButton
+                  transaction={() => claimTo({
+                    contract: contract,
+                    to: account?.address || "",
+                    quantity: BigInt(quantity),
+                  })}
+                  onTransactionConfirmed={async () => {
+                    alert("NFT Claimed!")
+                    setQuantity(1)
+                  }}
+                >
+                  {`Claim NFT (${getPrice(quantity)} ETH)`}
+                </TransactionButton>
+            </div>
+          )}
         </div>
-
-        <ThirdwebResources />
       </div>
     </main>
   );
@@ -38,61 +129,9 @@ function Header() {
       />
 
       <h1 className="text-2xl md:text-6xl font-semibold md:font-bold tracking-tighter mb-6 text-zinc-100">
-        thirdweb SDK
-        <span className="text-zinc-300 inline-block mx-1"> + </span>
-        <span className="inline-block -skew-x-6 text-blue-500"> Next.js </span>
+        Claim NFT
       </h1>
-
-      <p className="text-zinc-300 text-base">
-        Read the{" "}
-        <code className="bg-zinc-800 text-zinc-300 px-2 rounded py-1 text-sm mx-1">
-          README.md
-        </code>{" "}
-        file to get started.
-      </p>
     </header>
   );
 }
 
-function ThirdwebResources() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-3 justify-center">
-      <ArticleCard
-        title="thirdweb SDK Docs"
-        href="https://portal.thirdweb.com/typescript/v5"
-        description="thirdweb TypeScript SDK documentation"
-      />
-
-      <ArticleCard
-        title="Components and Hooks"
-        href="https://portal.thirdweb.com/typescript/v5/react"
-        description="Learn about the thirdweb React components and hooks in thirdweb SDK"
-      />
-
-      <ArticleCard
-        title="thirdweb Dashboard"
-        href="https://thirdweb.com/dashboard"
-        description="Deploy, configure, and manage your smart contracts from the dashboard."
-      />
-    </div>
-  );
-}
-
-function ArticleCard(props: {
-  title: string;
-  href: string;
-  description: string;
-}) {
-  return (
-    <a
-      href={props.href + "?utm_source=next-template"}
-      target="_blank"
-      className="flex flex-col border border-zinc-800 p-4 rounded-lg hover:bg-zinc-900 transition-colors hover:border-zinc-700"
-    >
-      <article>
-        <h2 className="text-lg font-semibold mb-2">{props.title}</h2>
-        <p className="text-sm text-zinc-400">{props.description}</p>
-      </article>
-    </a>
-  );
-}
